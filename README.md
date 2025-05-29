@@ -1,10 +1,16 @@
 # 日志智能分析系统文档
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/your-username/AI_Analysis)](https://github.com/your-username/AI_Analysis)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/aiicie/logai)](https://github.com/aiicie/logai)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/github/workflow/status/your-username/AI_Analysis/Go)](https://github.com/your-username/AI_Analysis/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/your-username/AI_Analysis)](https://goreportcard.com/report/github.com/your-username/AI_Analysis)
-[![codecov](https://codecov.io/gh/your-username/AI_Analysis/branch/main/graph/badge.svg)](https://codecov.io/gh/your-username/AI_Analysis)
+[![Build Status](https://img.shields.io/github/workflow/status/aiicie/logai/Go)](https://github.com/aiicie/logai/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/aiicie/logai)](https://goreportcard.com/report/github.com/aiicie/logai)
+[![GitHub Stars](https://img.shields.io/github/stars/aiicie/logai?style=social)](https://github.com/aiicie/logai/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/aiicie/logai?style=social)](https://github.com/aiicie/logai/network)
+[![GitHub Issues](https://img.shields.io/github/issues/aiicie/logai?style=social)](https://github.com/aiicie/logai/issues)
+[![GitHub Pull Requests](https://img.shields.io/github/issues-pr/aiicie/logai?style=social)](https://github.com/aiicie/logai/pulls)
+[![GitHub Contributors](https://img.shields.io/github/contributors/aiicie/logai?style=social)](https://github.com/aiicie/logai/graphs/contributors)
+[![codecov](https://codecov.io/gh/aiicie/logai/branch/main/graph/badge.svg)](https://codecov.io/gh/aiicie/logai)
+
 
 ## 🚀 系统概述
 
