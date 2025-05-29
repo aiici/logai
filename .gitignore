@@ -1,0 +1,7 @@
+# Environment variables
+.env
+
+# Folders to ignore
+/offsets/
+/testLog/
+/.idea/
