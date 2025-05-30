@@ -3,7 +3,6 @@ package esclient
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -128,7 +127,4 @@ func (e *ESClient) BulkIndexLogs(events []LogEvent, useAlias bool) error {
 	}
 
 	return nil
-}
-func IsTrue(s string) bool {
-	return strings.ToLower(strings.TrimSpace(s)) == "true"
 }
