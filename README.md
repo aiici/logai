@@ -1,15 +1,10 @@
 # 日志智能分析系统文档
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/aiicie/logai)](https://github.com/aiicie/logai)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/your-username/AI_Analysis)](https://github.com/your-username/AI_Analysis)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/github/workflow/status/aiicie/logai/Go)](https://github.com/aiicie/logai/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/aiicie/logai)](https://goreportcard.com/report/github.com/aiicie/logai)
-[![GitHub Stars](https://img.shields.io/github/stars/aiicie/logai?style=social)](https://github.com/aiicie/logai/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/aiicie/logai?style=social)](https://github.com/aiicie/logai/network)
-[![GitHub Issues](https://img.shields.io/github/issues/aiicie/logai?style=social)](https://github.com/aiicie/logai/issues)
-[![GitHub Pull Requests](https://img.shields.io/github/issues-pr/aiicie/logai?style=social)](https://github.com/aiicie/logai/pulls)
-[![GitHub Contributors](https://img.shields.io/github/contributors/aiicie/logai?style=social)](https://github.com/aiicie/logai/graphs/contributors)
-[![codecov](https://codecov.io/gh/aiicie/logai/branch/main/graph/badge.svg)](https://codecov.io/gh/aiicie/logai)
+[![Build Status](https://img.shields.io/github/workflow/status/your-username/AI_Analysis/Go)](https://github.com/your-username/AI_Analysis/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/your-username/AI_Analysis)](https://goreportcard.com/report/github.com/your-username/AI_Analysis)
+[![codecov](https://codecov.io/gh/your-username/AI_Analysis/branch/main/graph/badge.svg)](https://codecov.io/gh/your-username/AI_Analysis)
 
 ## 🚀 系统概述
 
@@ -134,7 +129,7 @@ go mod tidy
 请根据 `.env.example` 创建一个 `.env` 文件：
 
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 
 并根据实际情况填写以下字段：
@@ -145,16 +140,31 @@ LOG_FILE_PATHS=./testLog/syslog,./testLog/messages,/var/log/application.log
 
 # AI分析配置
 AI_API_URL=https://api.openai.com/v1/chat/completions
-AI_API_KEY=your_api_key_here // 替换为使用的API密钥
-AI_MODEL_NAME=gpt-3.5-turbo // 替换为模型名称
-AI_ENABLE=true // 是否启用AI分析
+AI_API_KEY=your_api_key_here
+AI_MODEL_NAME=gpt-3.5-turbo
+# 是否启用AI（true/false default:false）
+AI_ENABLE=false
 
 # 微信告警配置
-AI_WECHAT_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=your_webhook_key // 企业微信告警webhook
+AI_WECHAT_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=your_webhook_key
+#是否启用告警（true/false default:false）
+ALERT_ENABLE="false"
 
 # Elasticsearch配置
-ES_NODES=http://localhost:9200 // Elasticsearch节点地址
-ES_INDEX=log-analysis // Elasticsearch索引名称
+ES_NODES=http://localhost:9200
+ES_INDEX=log-analysis
+#是否启用ES（true/false default:false）
+ES_ENABLE="false"
+# metrics配置
+METRICS_PORT=2112
+
+
+# 可选：自定义采集配置
+# COLLECTOR_MAX_WORKERS=10
+# COLLECTOR_CONTEXT_LINES=5
+# COLLECTOR_BUFFER_SIZE=1000
+# COLLECTOR_TIMEOUT=30s
+
 ```
 
 ### � 运行系统

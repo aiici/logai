@@ -42,6 +42,18 @@ func main() {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
+	// 初始化日志文件
+	logDir := "/var/log/logai"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		log.Fatalf("创建日志目录失败: %v", err)
+	}
+	logFile, err := os.OpenFile(filepath.Join(logDir, "logai-analyzer.log"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("创建日志文件失败: %v", err)
+	}
+	log.SetOutput(logFile)
+
 	// 2. 初始化ES客户端
 	var esClient *esclient.ESClient
 	if config.IsTrue(cfg.ESEnable) {
