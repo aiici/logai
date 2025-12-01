@@ -41,6 +41,11 @@ var (
 		Buckets: prometheus.DefBuckets,
 	})
 
+	ESWriteSuccessCount = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "es_write_success_total",
+		Help: "ES写入成功次数",
+	})
+
 	// 告警相关指标
 	AlertSentCount = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "alerts_sent_total",
@@ -57,6 +62,11 @@ var (
 		Help: "合并的告警总数",
 	})
 
+	AlertSkipCount = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "alerts_skip_total",
+		Help: "跳过的告警次数",
+	})
+
 	// Cell Trace相关指标
 	CellTraceErrorCount = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "cell_trace_errors_total",
@@ -67,5 +77,16 @@ var (
 		Name:    "cell_trace_error_severity",
 		Help:    "Cell Trace异常严重性分布",
 		Buckets: []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+	})
+
+	// 事件处理相关指标
+	EventProcessSuccessCount = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "event_process_success_total",
+		Help: "事件处理成功次数",
+	})
+
+	EventProcessErrorCount = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "event_process_errors_total",
+		Help: "事件处理错误次数",
 	})
 )

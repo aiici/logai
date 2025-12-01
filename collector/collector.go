@@ -3,6 +3,8 @@ package collector
 import (
 	"bufio"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -15,26 +17,28 @@ import (
 )
 
 // 扩展关键词匹配，支持正则表达式
-var keywords = []string{"ERROR", "FAILED", "Failed", "Error", "fail", "error", "oom", "killed", "OOM", "KILLED", "Cell Trace", "Runtime Error", "Exception", "Panic", "Fatal", "Critical", "Timeout", "Connection refused", "OutOfMemory"}
+var keywords = []string{"ERROR", "FAILED", "Failed", "Error", "fail", "error", "oom", "killed", "OOM", "KILLED", "Cell Trace", "Runtime Error", "Exception", "Panic", "Fatal", "Critical", "Timeout", "Connection refused", "OutOfMemory", "Segmentation fault", "core dumped", "Blocked for more than", "hung_task_timeout_secs"}
 
 // 严重性评分系统
 var severityMap = map[string]int{
-	"FATAL":              10,
-	"CRITICAL":           9,
-	"ERROR":              8,
-	"EXCEPTION":          7,
-	"PANIC":              7,
-	"OOM":                8,
-	"OUTOFMEMORY":        8,
-	"KILLED":             6,
-	"FAILED":             5,
-	"FAIL":               4,
-	"CELL TRACE":         6,
-	"RUNTIME ERROR":      5,
-	"TIMEOUT":            4,
-	"CONNECTION REFUSED": 3,
-	"WARNING":            2,
-	"WARN":               2,
+	"FATAL":                  10,
+	"CRITICAL":               9,
+	"ERROR":                  8,
+	"EXCEPTION":              7,
+	"PANIC":                  7,
+	"OOM":                    8,
+	"OUTOFMEMORY":            8,
+	"KILLED":                 6,
+	"FAILED":                 5,
+	"FAIL":                   4,
+	"CELL TRACE":             6,
+	"RUNTIME ERROR":          5,
+	"TIMEOUT":                4,
+	"CONNECTION REFUSED":     3,
+	"HUNG_TASK_TIMEOUT_SECS": 5,
+	"SEGMENTATION FAULT":     9,
+	"CORE DUMPED":            8,
+	"BLOCKED FOR MORE THAN":  8,
 }
 
 // Cell Trace 异常的特殊模式
@@ -173,18 +177,7 @@ func readFromFileWithContext(ctx context.Context, filePath string, config Collec
 	}
 	defer file.Close()
 
-	// 获取文件大小
-	fileInfo, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-
 	lastOffset := loadOffset(filePath)
-	// 如果文件大小小于等于上次的偏移量，说明没有新内容
-	if fileInfo.Size() <= lastOffset {
-		return nil, nil
-	}
-
 	_, err = file.Seek(lastOffset, io.SeekStart)
 	if err != nil {
 		return nil, err
@@ -213,19 +206,10 @@ func readFromFileWithContext(ctx context.Context, filePath string, config Collec
 	var bufferLineNums []int
 	var matched bool
 	var matchStartLine int
-	var lastErrorLine string // 用于检测重复错误
 
 	for i, line := range allLines {
 		isMatch, isCellTrace := isLineMatch(line)
-		// 检查是否与上一个错误消息相似
-		if isMatch && isSimilarError(line, lastErrorLine) {
-			continue // 跳过相似的错误消息
-		}
-
 		if isMatch {
-			// 保存当前错误消息用于后续比较
-			lastErrorLine = line
-
 			if len(buffer) > 0 && matched {
 				// 处理前一个事件
 				event := toLogEventWithContext(buffer, bufferLineNums, filePath, matchStartLine, allLines, config.ContextLines)
@@ -241,17 +225,6 @@ func readFromFileWithContext(ctx context.Context, filePath string, config Collec
 			if shouldIncludeLine(line, buffer) {
 				buffer = append(buffer, line)
 				bufferLineNums = append(bufferLineNums, lineNumbers[i])
-			} else {
-				// 如果不应该包含该行，说明当前错误消息已经结束
-				matched = false
-				// 处理当前缓冲区中的事件
-				if len(buffer) > 0 {
-					event := toLogEventWithContext(buffer, bufferLineNums, filePath, matchStartLine, allLines, config.ContextLines)
-					event.IsCellTrace = isCellTrace
-					events = append(events, event)
-					buffer = nil
-					bufferLineNums = nil
-				}
 			}
 		}
 	}
@@ -336,6 +309,12 @@ func isLineMatch(line string) (bool, bool) {
 			return true, false
 		}
 	}
+
+	// 检查是否为JSON格式的日志且包含错误信息
+	if strings.HasPrefix(strings.TrimSpace(line), "{") && strings.Contains(line, "error") {
+		return true, false
+	}
+
 	return false, false
 }
 
@@ -346,159 +325,57 @@ func shouldIncludeLine(line string, buffer []string) bool {
 		return false
 	}
 
-	// 如果缓冲区为空，不应该包含任何行
-	if len(buffer) == 0 {
-		return false
-	}
-
-	// 获取缓冲区的第一行作为参考
-	firstLine := buffer[0]
-
-	// 检查是否为堆栈跟踪
-	stackTraceKeywords := []string{"at ", "Caused by", "Exception in thread", "Traceback", "File \""}
-	indentationMarkers := []string{"\t", "    "}
-
-	// 检查是否为缩进的堆栈信息
-	isIndented := false
-	for _, marker := range indentationMarkers {
-		if strings.HasPrefix(line, marker) {
-			isIndented = true
-			break
-		}
-	}
-
-	// 如果是缩进的行，检查是否包含Java包名或Python文件路径
-	if isIndented {
-		packageKeywords := []string{"java.", "org.", "com.", "net.", "io.", "/", ".py", ".java"}
-		for _, pkg := range packageKeywords {
-			if strings.Contains(line, pkg) {
-				return true
-			}
-		}
-	}
-
-	// 检查是否包含堆栈跟踪关键词
+	// 如果包含堆栈跟踪相关的关键词
+	stackTraceKeywords := []string{"at ", "Caused by", "\t", "    ", "Exception in thread", "java.", "org.", "com.", "Traceback", "File \"", "line "}
 	for _, kw := range stackTraceKeywords {
 		if strings.Contains(line, kw) {
 			return true
 		}
 	}
 
-	// 特殊处理Cell Trace相关的行
-	if isCellTraceLine(firstLine) {
-		// 只包含与Cell Trace直接相关的信息
-		return strings.Contains(strings.ToLower(line), "trace id") ||
-			(strings.Contains(line, ":") && strings.Contains(strings.ToLower(line), "error"))
-	}
+	// 特殊处理内核日志的Call Trace
+	// 检查是否为内核Call Trace的相关行
+	if len(buffer) > 0 {
+		firstLine := buffer[0]
+		// 如果第一个匹配行包含Call Trace关键词
+		if strings.Contains(firstLine, "Call Trace:") || strings.Contains(firstLine, "call trace") {
+			// 包含以下特征的行都应该收集
+			kernelTraceIndicators := []string{"<TASK>", "</TASK>", "+0x", "/", "RIP:", "RSP:", "RAX:", "RBX:", "RCX:", "RDX:", "RSI:", "RDI:", "RBP:", "R8:", "R9:", "R10:", "R11:", "R12:", "R13:", "R14:", "R15:"}
+			for _, indicator := range kernelTraceIndicators {
+				if strings.Contains(line, indicator) {
+					return true
+				}
+			}
 
-	return false
-}
+			// 如果行以函数名+偏移量格式开头，也应该收集
+			// 例如: __schedule+0x2a9/0x8b0
+			if strings.Contains(line, "+0x") && strings.Contains(line, "/") {
+				return true
+			}
 
-// 判断是否为Cell Trace行
-func isCellTraceLine(line string) bool {
-	for _, pattern := range cellTracePatterns {
-		if pattern.MatchString(line) {
-			return true
-		}
-	}
-	return false
-}
-
-// 判断两个错误消息是否相似
-func isSimilarError(current, last string) bool {
-	// 如果没有上一条错误消息，则不相似
-	if last == "" {
-		return false
-	}
-
-	// 移除时间戳、数字和特定ID等可变信息
-	currentCleaned := cleanErrorMessage(current)
-	lastCleaned := cleanErrorMessage(last)
-
-	// 如果清理后的消息完全相同，认为是重复错误
-	if currentCleaned == lastCleaned {
-		return true
-	}
-
-	// 计算相似度
-	return calculateSimilarity(currentCleaned, lastCleaned) > 0.8 // 80%相似度阈值
-}
-
-// 清理错误消息中的可变信息
-func cleanErrorMessage(message string) string {
-	// 移除时间戳格式
-	timePattern := regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(\.\d+)?([-+]\d{2}:?\d{2}|Z)?`)
-	message = timePattern.ReplaceAllString(message, "")
-
-	// 移除十六进制ID
-	hexPattern := regexp.MustCompile(`0x[0-9a-fA-F]+`)
-	message = hexPattern.ReplaceAllString(message, "")
-
-	// 移除UUID格式
-	uuidPattern := regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
-	message = uuidPattern.ReplaceAllString(message, "")
-
-	// 移除普通数字
-	numberPattern := regexp.MustCompile(`\b\d+\b`)
-	message = numberPattern.ReplaceAllString(message, "")
-
-	// 移除多余的空白字符
-	spacePattern := regexp.MustCompile(`\s+`)
-	message = spacePattern.ReplaceAllString(message, " ")
-
-	return strings.TrimSpace(message)
-}
-
-// 计算两个字符串的相似度（使用Levenshtein距离）
-func calculateSimilarity(s1, s2 string) float64 {
-	len1, len2 := len(s1), len(s2)
-	if len1 == 0 || len2 == 0 {
-		return 0.0
-	}
-
-	// 创建距离矩阵
-	matrix := make([][]int, len1+1)
-	for i := range matrix {
-		matrix[i] = make([]int, len2+1)
-		matrix[i][0] = i
-	}
-	for j := range matrix[0] {
-		matrix[0][j] = j
-	}
-
-	// 计算Levenshtein距离
-	for i := 1; i <= len1; i++ {
-		for j := 1; j <= len2; j++ {
-			if s1[i-1] == s2[j-1] {
-				matrix[i][j] = matrix[i-1][j-1]
-			} else {
-				matrix[i][j] = min(matrix[i-1][j-1]+1, // 替换
-					min(matrix[i][j-1]+1, // 插入
-						matrix[i-1][j]+1)) // 删除
+			// 如果行包含寄存器信息，也应该收集
+			if strings.Contains(line, ":") && (strings.Contains(line, "0x") || strings.Contains(line, "ffff")) {
+				return true
 			}
 		}
 	}
 
-	// 计算相似度得分（0到1之间）
-	maxLen := float64(max(len1, len2))
-	distance := float64(matrix[len1][len2])
-	return 1.0 - (distance / maxLen)
-}
-
-// 辅助函数：返回两个整数中的较小值
-func min(a, b int) int {
-	if a < b {
-		return a
+	// 如果是Cell Trace相关的后续行
+	if len(buffer) > 0 {
+		firstLine := buffer[0]
+		for _, pattern := range cellTracePatterns {
+			if pattern.MatchString(firstLine) {
+				// Cell Trace异常，收集更多上下文
+				if strings.Contains(strings.ToLower(line), "trace") ||
+					strings.Contains(strings.ToLower(line), "cell") ||
+					strings.Contains(line, ":") {
+					return true
+				}
+			}
+		}
 	}
-	return b
-}
 
-// 辅助函数：返回两个整数中的较大值
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
+	return false
 }
 
 // 带上下文的日志事件创建函数
@@ -507,17 +384,19 @@ func toLogEventWithContext(lines []string, lineNumbers []int, filePath string, s
 	text := strings.Join(lines, "\n")
 	tags := extractTags(lines)
 	score := calculateSeverityScore(lines, tags)
-	eventID := extractEventID(lines)
-	timestamp := extractTimestamp(lines) // 智能提取时间戳
+	eventID := ExtractEventID(lines)
 
 	// 提取上下文行
 	contextBefore, contextAfter := extractContext(allLines, startLine-1, contextLines)
 	contextLinesResult := append(contextBefore, contextAfter...)
 
+	// 添加调试日志
+	// fmt.Printf("生成事件: EventID=%s, 内容前20字符=%s\n", eventID, getFirstNChars(text, 20))
+
 	return LogEvent{
 		RawLines:      lines,
 		RawText:       text,
-		Timestamp:     timestamp,
+		Timestamp:     time.Now().Format(time.RFC3339),
 		Host:          host,
 		Tags:          tags,
 		SeverityScore: score,
@@ -567,9 +446,19 @@ func calculateSeverityScore(lines []string, tags []string) int {
 		score += 2
 	}
 
+	// 内核Call Trace异常额外加分
+	if strings.Contains(text, "Call Trace:") || strings.Contains(upperText, "CALL TRACE") {
+		score += 4
+	}
+
+	// 包含<TASK>和</TASK>标记加分
+	if strings.Contains(text, "<TASK>") && strings.Contains(text, "</TASK>") {
+		score += 3
+	}
+
 	// 包含多个错误关键词加分
 	errorCount := 0
-	for _, kw := range []string{"ERROR", "EXCEPTION", "FAILED", "FATAL"} {
+	for _, kw := range []string{"ERROR", "EXCEPTION", "FAILED", "FATAL", "SEGMENTATION FAULT", "CORE DUMPED", "CALL TRACE", "BLOCKED FOR MORE THAN"} {
 		if strings.Contains(upperText, kw) {
 			errorCount++
 		}
@@ -578,9 +467,24 @@ func calculateSeverityScore(lines []string, tags []string) int {
 		score += errorCount
 	}
 
+	// 检查是否包含JSON格式的错误信息
+	if strings.Contains(text, "\"level\":\"error\"") || strings.Contains(text, "\"error\":") {
+		score += 3
+	}
+
+	// 检查是否为内核hung task问题
+	if strings.Contains(text, "blocked for more than") && strings.Contains(text, "hung_task_timeout_secs") {
+		score += 5
+	}
+
 	// 确保最小分数为最高单项分数
 	if score < maxScore {
 		score = maxScore
+	}
+
+	// 限制最高分数
+	if score > 10 {
+		score = 10
 	}
 
 	return score
@@ -627,117 +531,77 @@ func extractTags(lines []string) []string {
 	return tags
 }
 
-// 智能提取EventID，支持多种ID格式
-func extractEventID(lines []string) string {
-	// ID提取模式，按优先级排序
-	idPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)trace[_-]?id[:\s=]+([a-zA-Z0-9-_]+)`),
-		regexp.MustCompile(`(?i)request[_-]?id[:\s=]+([a-zA-Z0-9-_]+)`),
-		regexp.MustCompile(`(?i)session[_-]?id[:\s=]+([a-zA-Z0-9-_]+)`),
-		regexp.MustCompile(`(?i)correlation[_-]?id[:\s=]+([a-zA-Z0-9-_]+)`),
-		regexp.MustCompile(`(?i)transaction[_-]?id[:\s=]+([a-zA-Z0-9-_]+)`),
-		regexp.MustCompile(`(?i)\[([a-zA-Z0-9-_]{8,})\]`),                                                   // [ID] 格式
-		regexp.MustCompile(`([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})`), // UUID格式
-	}
-
+// 提取TraceID或者RequestID
+func ExtractEventID(lines []string) string {
 	for _, line := range lines {
-		for _, pattern := range idPatterns {
-			if matches := pattern.FindStringSubmatch(line); len(matches) > 1 {
-				id := strings.TrimSpace(matches[1])
-				if len(id) >= 6 { // 确保ID有足够长度
-					return id
-				}
+		if strings.Contains(line, "TraceID:") {
+			parts := strings.Split(line, "TraceID:")
+			if len(parts) > 1 {
+				id := strings.Fields(parts[1])[0]
+				return id
+			}
+		}
+		if strings.Contains(line, "RequestID:") {
+			parts := strings.Split(line, "RequestID:")
+			if len(parts) > 1 {
+				id := strings.Fields(parts[1])[0]
+				return id
 			}
 		}
 	}
 
-	// 如果没有找到ID，生成基于内容的哈希ID
-	return generateContentBasedID(lines)
+	// 如果没有找到明确的ID，基于日志内容生成一个稳定的哈希ID
+	if len(lines) > 0 {
+		content := strings.Join(lines, "\n")
+		// 移除时间戳等变化的部分，保留稳定的特征
+		content = removeTimestamps(content)
+		// 使用简单的哈希算法生成ID
+		return generateStableID(content)
+	}
+	return ""
 }
 
-// 生成基于内容的唯一ID
-func generateContentBasedID(lines []string) string {
-	if len(lines) == 0 {
-		return fmt.Sprintf("auto_%d", time.Now().UnixNano())
-	}
-
-	// 使用第一行的哈希值作为ID
-	content := lines[0]
-	if len(content) > 50 {
-		content = content[:50] // 限制长度
-	}
-
-	// 简单哈希算法
-	hash := uint32(0)
-	for _, c := range content {
-		hash = hash*31 + uint32(c)
-	}
-
-	return fmt.Sprintf("hash_%x_%d", hash, time.Now().Unix())
+// removeTimestamps 移除日志中的时间戳，使内容更稳定
+func removeTimestamps(content string) string {
+	// 移除常见的时间戳格式
+	re := regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.\d]*[+-]\d{2}:\d{2}|\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[,.]\d{3}|\w{3} \d{1,2} \d{2}:\d{2}:\d{2}`)
+	content = re.ReplaceAllString(content, "")
+	return content
 }
 
-// 智能提取时间戳
-func extractTimestamp(lines []string) string {
-	// 常见的时间戳格式模式
-	timestampPatterns := []*regexp.Regexp{
-		// ISO 8601 格式
-		regexp.MustCompile(`(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})?)`),
-		// 标准日期时间格式
-		regexp.MustCompile(`(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{3})?)`),
-		// 日志常见格式
-		regexp.MustCompile(`(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})`),
-		// 另一种常见格式
-		regexp.MustCompile(`(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`),
-		// 带毫秒的格式
-		regexp.MustCompile(`(\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}\.\d{3})`),
-		// Unix时间戳（10位或13位）
-		regexp.MustCompile(`\b(1[0-9]{9,12})\b`),
+// generateStableID 基于内容生成稳定的ID
+func generateStableID(content string) string {
+	// 使用MD5哈希生成稳定的ID
+	// 首先标准化内容，移除变化的部分
+	normalized := normalizeContent(content)
+
+	// 计算MD5哈希
+	hash := md5.Sum([]byte(normalized))
+	return hex.EncodeToString(hash[:])
+}
+
+// normalizeContent 标准化内容，移除变化的部分
+func normalizeContent(content string) string {
+	// 移除时间戳
+	content = removeTimestamps(content)
+
+	// 移除可能变化的数字（如PID、端口号等）
+	re := regexp.MustCompile(`\b\d+\b`)
+	content = re.ReplaceAllString(content, "NUMBER")
+
+	// 转换为小写以提高一致性
+	content = strings.ToLower(content)
+
+	// 移除多余的空白字符
+	content = regexp.MustCompile(`\s+`).ReplaceAllString(content, " ")
+
+	return strings.TrimSpace(content)
+}
+
+// getFirstNChars 获取字符串的前n个字符
+func getFirstNChars(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-
-	// 对应的时间格式
-	timeFormats := []string{
-		time.RFC3339,
-		"2006-01-02 15:04:05.000",
-		"01/02/2006 15:04:05",
-		"2006/01/02 15:04:05",
-		"01-02-2006 15:04:05.000",
-		"", // Unix时间戳特殊处理
-	}
-
-	for _, line := range lines {
-		for i, pattern := range timestampPatterns {
-			if matches := pattern.FindStringSubmatch(line); len(matches) > 1 {
-				timestampStr := matches[1]
-
-				// 特殊处理Unix时间戳
-				if i == len(timestampPatterns)-1 {
-					if timestamp, err := strconv.ParseInt(timestampStr, 10, 64); err == nil {
-						// 判断是秒还是毫秒
-						if timestamp > 1000000000000 { // 13位，毫秒
-							return time.Unix(timestamp/1000, (timestamp%1000)*1000000).Format(time.RFC3339)
-						} else { // 10位，秒
-							return time.Unix(timestamp, 0).Format(time.RFC3339)
-						}
-					}
-					continue
-				}
-
-				// 尝试解析时间格式
-				format := timeFormats[i]
-				if format == "2006-01-02 15:04:05.000" {
-					// 处理可能没有毫秒的情况
-					if !strings.Contains(timestampStr, ".") {
-						format = "2006-01-02 15:04:05"
-					}
-				}
-
-				if parsedTime, err := time.Parse(format, timestampStr); err == nil {
-					return parsedTime.Format(time.RFC3339)
-				}
-			}
-		}
-	}
-
-	// 如果没有找到时间戳，使用当前时间
-	return time.Now().Format(time.RFC3339)
+	return s[:n]
 }
